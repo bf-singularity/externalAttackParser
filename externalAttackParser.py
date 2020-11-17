@@ -76,99 +76,115 @@ with open(arguments.path, 'r') as inFile:
     content = inFile.readlines()
     awsJson = json.loads(content[1]) #scout results.js file contains dict starting on second line
 
-    # dicts to hold ports and IP addresses for systems
-    tcpPortSystems = {}
-    udpPortSystems = {}
-    allPortSystems = {}
-    tcpPortSystemsIpv6 = {}
-    udpPortSystemsIpv6 = {}
-    allPortSystemsIpv6 = {}
+# dicts to hold ports and IP addresses for systems
+tcpPortSystems = {}
+udpPortSystems = {}
+allPortSystems = {}
+tcpPortSystemsIpv6 = {}
+udpPortSystemsIpv6 = {}
+allPortSystemsIpv6 = {}
 
-    # Loop through IPs of externally accessible systems
-    for ip,info in awsJson['services']['ec2']['external_attack_surface'].items():
-        #print(ip)
-        #print(info)
-        #exit(0)
+csvFile = "Region,DnsName,IP Address,Ports\n"
+# Loop through IPs of externally accessible systems
+for ip,info in awsJson['services']['ec2']['external_attack_surface'].items():
+    tmpPorts = [] #used for csv report
 
-        # Loop through protocols
-        # TODO refactor to avoid repeat code
-        try:
-            for prot,protDetails in info['protocols'].items():
+    # Loop through protocols
+    # TODO refactor to avoid repeat code
+    try:
+        for prot,protDetails in info['protocols'].items():
 
-                # use dns name unless there isn't one, then use ipv4/ipv6 IP
-                if "PublicDnsName" not in info: 
-                    system = ip
-                else:
-                    system = info["PublicDnsName"]
+            # use dns name unless there isn't one, then use ipv4/ipv6 IP
+            if "PublicDnsName" not in info: 
+                system = ip
+                name = "N/A" #to be used for csv report
+            else:
+                system = info["PublicDnsName"]
+                name = info["PublicDnsName"]
 
-                if prot == "TCP": #case tcp
-                    for port,v in protDetails["ports"].items():
-                        for cidr in v["cidrs"]:
-                            if "0.0.0.0/0" in cidr["CIDR"]:
-                                if ":" in system:
-                                    if port in tcpPortSystemsIpv6:
-                                        if system in tcpPortSystemsIpv6[port]:
-                                            pass
-                                        else:
-                                            tcpPortSystemsIpv6[port].append(system)
+            if prot == "TCP": #case tcp
+                for port,v in protDetails["ports"].items():
+                    for cidr in v["cidrs"]:
+                        if "0.0.0.0/0" in cidr["CIDR"]:
+                            if ":" in system:
+                                if port in tcpPortSystemsIpv6:
+                                    if system in tcpPortSystemsIpv6[port]:
+                                        pass
                                     else:
-                                        tcpPortSystemsIpv6[port] = [system]
+                                        tcpPortSystemsIpv6[port].append(system)
                                 else:
-                                    if port in tcpPortSystems:
-                                        if system in tcpPortSystems[port]:
-                                            pass
-                                        else:
-                                            tcpPortSystems[port].append(system)
+                                    tcpPortSystemsIpv6[port] = [system]
+                            else:
+                                if port in tcpPortSystems:
+                                    if system in tcpPortSystems[port]:
+                                        pass
                                     else:
-                                        tcpPortSystems[port] = [system]
-                #case udp
-                if prot == "UDP":
-                    for port,v in protDetails["ports"].items():
-                        for cidr in v["cidrs"]:
-                            if "0.0.0.0/0" in cidr["CIDR"]:
-                                if ":" in system:
-                                    if port in udpPortSystemsIpv6:
-                                        if system in udpPortSystemsIpv6[port]:
-                                            pass
-                                        else:
-                                            udpPortSystemsIpv6[port].append(system)
-                                    else:
-                                        udpPortSystemsIpv6[port] = [system]
+                                        tcpPortSystems[port].append(system)
                                 else:
-                                    if port in udpPortSystems:
-                                        if system in udpPortSystems[port]:
-                                            pass
-                                        else:
-                                            udpPortSystems[port].append(system)
+                                    tcpPortSystems[port] = [system]
+                            #CSV reporting
+                            tmpPorts.append(port)
+                            
+            #case udp
+            if prot == "UDP":
+                for port,v in protDetails["ports"].items():
+                    for cidr in v["cidrs"]:
+                        if "0.0.0.0/0" in cidr["CIDR"]:
+                            if ":" in system:
+                                if port in udpPortSystemsIpv6:
+                                    if system in udpPortSystemsIpv6[port]:
+                                        pass
                                     else:
-                                        udpPortSystems[port] = [system]
-                #case all
-                # TODO this will probably error out because "ALL" protocol doesn't use port notation
-                if prot == "ALL":
-                    for port,v in protDetails["ports"].items():
-                        for cidr in v["cidrs"]:
-                            if "0.0.0.0/0" in cidr["CIDR"]:
-                                if ":" in system:
-                                    if port in allPortSystemsIpv6:
-                                        if system in allPortSystemsIpv6[port]:
-                                            pass
-                                        else:
-                                            allPortSystemsIpv6[port].append(system)
-                                    else:
-                                        allPortSystemsIpv6[port] = [system]
+                                        udpPortSystemsIpv6[port].append(system)
                                 else:
-                                    if port in allPortSystems:
-                                        if system in allPortSystems[port]:
-                                            pass
-                                        else:
-                                            allPortSystems[port].append(system)
+                                    udpPortSystemsIpv6[port] = [system]
+                            else:
+                                if port in udpPortSystems:
+                                    if system in udpPortSystems[port]:
+                                        pass
                                     else:
-                                        allPortSystems[port] = [system]
-        except KeyError as e:
-            print("KeyError: " + str(e))
-            print(ip)
-            print(info)
-            exit(0)
+                                        udpPortSystems[port].append(system)
+                                else:
+                                    udpPortSystems[port] = [system]
+                            #CSV reporting
+                            tmpPorts.append(port)
+            #case all
+            # TODO this will probably error out because "ALL" protocol doesn't use port notation
+            if prot == "ALL":
+                for port,v in protDetails["ports"].items():
+                    for cidr in v["cidrs"]:
+                        if "0.0.0.0/0" in cidr["CIDR"]:
+                            if ":" in system:
+                                if port in allPortSystemsIpv6:
+                                    if system in allPortSystemsIpv6[port]:
+                                        pass
+                                    else:
+                                        allPortSystemsIpv6[port].append(system)
+                                else:
+                                    allPortSystemsIpv6[port] = [system]
+                            else:
+                                if port in allPortSystems:
+                                    if system in allPortSystems[port]:
+                                        pass
+                                    else:
+                                        allPortSystems[port].append(system)
+                                else:
+                                    allPortSystems[port] = [system]
+                            #CSV reporting
+                            tmpPorts.append(port)
+        #add to csv report
+        if tmpPorts:
+            csvFile = csvFile + "tbd," + name + "," + ip + ",\"" + "\n".join(tmpPorts) + "\"\n" 
+    
+    except KeyError as e:
+        print("KeyError: " + str(e))
+        print(ip)
+        print(info)
+        exit(0)
+
+with open("report.csv", "w+") as outFile:
+    outFile.write(csvFile)
+    exit(0)
 
 # Add info to dicts to indicate what info they contain, then add dicts to single list
 # Copying original dicts into new dict because I suck at coming up with good data structures from the start

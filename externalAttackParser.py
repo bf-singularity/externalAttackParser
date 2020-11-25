@@ -17,7 +17,17 @@ that have those ports open.
 Question: "But why are you scanning multiple IPs for a single port, instead of multiple ports for an IP like a normal person??"
 Answer: AWS accounts usually have a relatively small number of security groups applied to a large number of IP addresses, so it's likely that many systems have the same port(s) open. I would expect that grouping by port would lead to less individual port scans than grouping by IP. Ideally I can come up with a way to scan all IPs that have identical ports open at the same time, but that probably won't be in v1 of this tool. 
 
+Question: "Doesn't hirudinea already do this?"
+Answer: No. Hirudinea has some similar functionality in that it tries to find publicly exposed assets. But this tool goes a bit deeper when it comes to EC2 instances. Hirudinea will report on any EC2 instance that has a public IP assigned to it. But what if the instance has a security group applied to it that restricts access to ports based on IP address? Even though the instance has a public IP, it is not actually publicly exposed. My tool parses through IPs and finds systems that explicitly allow access on ports to 0.0.0.0/0, then performs nmap scans to see if something is live on those ports. 
 """
+
+# TODO:
+# DONE - support for ALL ports open to ALL
+# ability to exit out of portscan without cancelling the whole program
+# multithreading to provide status on long port scans
+# HTML report
+
+
 def prompt(conn, portRange, ips):
     willContinue = False
     while willContinue == False:
@@ -65,6 +75,13 @@ def nmapScan(portDict):
         print(message)
         result = subprocess.run(args, shell=True, capture_output=True).stdout.decode('utf-8')
 
+
+def print_resultsfile(awsJson):
+    for k,v in awsJson['services']['ec2']['external_attack_surface'].items():
+        print(k)
+        print(v)
+
+
 #Parse command line arguments    
 parser = argparse.ArgumentParser()
 parser.add_argument('-u', action="store_true", dest='udp', default=False, help="UDP mode")
@@ -76,6 +93,7 @@ with open(arguments.path, 'r') as inFile:
     content = inFile.readlines()
     awsJson = json.loads(content[1]) #scout results.js file contains dict starting on second line
 
+
 # dicts to hold ports and IP addresses for systems
 tcpPortSystems = {}
 udpPortSystems = {}
@@ -84,6 +102,7 @@ tcpPortSystemsIpv6 = {}
 udpPortSystemsIpv6 = {}
 allPortSystemsIpv6 = {}
 
+#TODO UDP/TCP
 csvFile = "Region,DnsName,IP Address,Ports\n"
 # Loop through IPs of externally accessible systems
 for ip,info in awsJson['services']['ec2']['external_attack_surface'].items():
@@ -154,6 +173,7 @@ for ip,info in awsJson['services']['ec2']['external_attack_surface'].items():
                 for port,v in protDetails["ports"].items():
                     for cidr in v["cidrs"]:
                         if "0.0.0.0/0" in cidr["CIDR"]:
+                        #if "4.34.125.215/32" in cidr["CIDR"]: #testing
                             if ":" in system:
                                 if port in allPortSystemsIpv6:
                                     if system in allPortSystemsIpv6[port]:
@@ -184,7 +204,6 @@ for ip,info in awsJson['services']['ec2']['external_attack_surface'].items():
 
 with open("report.csv", "w+") as outFile:
     outFile.write(csvFile)
-    exit(0)
 
 # Add info to dicts to indicate what info they contain, then add dicts to single list
 # Copying original dicts into new dict because I suck at coming up with good data structures from the start
@@ -217,7 +236,7 @@ else: #running in UDP mode, so only append UDP dicts
     udpPortSystemsIpv6New["ports"] = udpPortSystemsIpv6
     dictList.append(udpPortSystemsIpv6New)
 
-#TODO print CSV file with publicly accessible IPs and Ports as reported by the security groups. Will be useful for reporting. 
+#DONE - print CSV file with publicly accessible IPs and Ports as reported by the security groups. Will be useful for reporting. 
 
 """
 nmap
@@ -241,7 +260,7 @@ for portDict in dictList:
 """
 combining all nmap output and parsing
 """
-#path = "/tmp/xmlFiles-11-16-2020-17-20-52" #for testing
+#path = "/tmp/xmlFiles-11-25-2020-10-57-53" #for testing
 fileCounter = 1
 with open(path + "/combined.xml", "w+") as comboFile:
     # What follows below is some hacky code to write certain parts of files and not others in order to create a combined XML file that can be read by nmap-parse-output
@@ -273,6 +292,14 @@ with open(path + "/combined.xml", "w+") as comboFile:
     comboFile.write("</runstats>")
     comboFile.write("</nmaprun>")
 
-print("\nAll done!")
+print("\nAll done!\n")
 print("run \"nmap-parse-output " + path + "/combined.xml group-by-ports\" for an overview of publicly accessible services")
 print("Note that the combined.xml file is a spliced together XML file that can be read by nmap-parse-output. You can trust the IP and port info from this file, but not the metadata.")
+if allPortSystems or allPortSystemsIpv6:
+    print("\nThe following IPs exposed all TCP ports (1-65535) and we not automatically scanned:")
+    for port, systems in allPortSystems.items():
+        for system in systems:
+            print("* " + system)
+    for port, systems in allPortSystemsIpv6.items():
+        for system in systems:
+            print(system)

@@ -268,7 +268,9 @@ with open(path + "/combined.xml", "w+") as comboFile:
     for filename in os.listdir(path):
         writeLine = False
         skipToEnd = False
-        if not filename == "combined.xml":
+        if filename == "combined.xml":
+            continue
+        else:
             with open(path + "/" + filename, "r") as inFile:
                 for line in inFile.readlines():
                     if fileCounter == 1: #for first file, remove end of xml

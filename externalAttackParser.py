@@ -31,7 +31,7 @@ Answer: No. Hirudinea has some similar functionality in that it tries to find pu
 def prompt(conn, portRange, ips):
     willContinue = False
     while willContinue == False:
-        choice = input("You are about to " + conn + " scan portrange " + str(portRange[0]) + "-" + str(portRange[-1]) + " (" + str(len(portRange)) + " ports) on " + str(len(ips)) + " systems. Do you wish to continue? [Y/N] ")
+        choice = input("You are about to " + conn + " scan " + portRange + " on " + str(len(ips)) + " systems. Do you wish to continue? [Y/N] ")
         if choice.upper() == "Y" or choice.upper() == "YES":
             return True
         elif choice.upper() == "N" or choice.upper() == "NO":
@@ -43,37 +43,54 @@ def nmapScan(portDict):
     for port, ips in portDict["ports"].items():
         message = "Scanning " + portDict["connProt"] + " port " + port + " on " + str(len(ips)) + " " + portDict["ipProt"] + " systems."
         if portDict["connProt"] == "TCP":
-            args = "nmap -v -Pn -oX " + path + "/" + portDict["ipProt"] + "-tcp-" + port + ".xml -p " + port
-            if portDict["ipProt"] == "ipv6": #nmap needs the -6 flag to scan IPv6 addresses
-                args = args + " -6"
-            args = args + " " + " ".join(ips)
+            args = "nmap -v -Pn -oX " + path + "/" + portDict["ipProt"] + "-tcp-" + port 
+            
         else: 
-            args = "sudo nmap -sU -v -Pn -oX " + path + "/" + portDict["ipProt"] + "-udp-" + port + ".xml -p " + port
-            if portDict["ipProt"] == "ipv6": #nmap needs the -6 flag to scan IPv6 addresses
-                args = args + " -6"
-            args = args + " " + " ".join(ips)
+            args = "sudo nmap -sU -v -Pn -oX " + path + "/" + portDict["ipProt"] + "-udp-" + port
         
-        if "-" in port: # for large scans, check with user
+        listofLists = [ips]
+        checkForPromt = False
+        if len(ips) > 100: # for scans on a large number of systems, check with user
+            checkForPromt = True
+            listofLists = [ips[x:x+50] for x in range(0, len(ips), 50)]
+            portRange = "port " + port
+        
+        elif "-" in port: # for large port ranges, check with user
             ports = port.split("-")
             portRange = range(int(ports[0]),int(ports[1])+1)
 
-            checkForPromt = False
             if len(portRange) > 100 and portDict["connProt"] == "UDP": #UDP scans can take very long
                 checkForPromt = True
             elif len(portRange) > 100 and len(ips) > 10 and portDict["connProt"] == "TCP":
                 checkForPromt = True
             elif len(portRange) > 1000:
                 checkForPromt = True
-                
-            if checkForPromt == True:
-                willContinue = prompt(portDict["connProt"], portRange, ips)
-                if willContinue == False:
-                    continue
-                else:
-                    message += " This can take a long time."
 
+            portRange = "portrange " + str(portRange[0]) + "-" + str(portRange[-1]) + "(" + str(len(portRange)) + " ports)"
+        
+        if checkForPromt == True:
+            willContinue = prompt(portDict["connProt"], portRange, ips)
+            if willContinue == False:
+                continue
+            else:
+                message += " This can take a long time."
+
+        #print(str(len(listofLists)))
         print(message)
-        result = subprocess.run(args, shell=True, capture_output=True).stdout.decode('utf-8')
+        counter = 1
+        ipSum = 0    
+        oldArgs = args
+        for l in listofLists:
+            args = oldArgs + "-" + str(counter) + ".xml -p " + port
+            if portDict["ipProt"] == "ipv6": #nmap needs the -6 flag to scan IPv6 addresses
+                args = args + " -6"
+
+            args = args + " " + " ".join(l)
+            if counter > 1 and ipSum % 200 == 0:
+                print("Scanned " + str(ipSum) + "/" + str(len(ips)) + " systems")
+            result = subprocess.run(args, shell=True, capture_output=True).stdout.decode('utf-8')
+            counter += 1
+            ipSum += len(l)
 
 
 def print_resultsfile(awsJson):
@@ -93,6 +110,7 @@ with open(arguments.path, 'r') as inFile:
     content = inFile.readlines()
     awsJson = json.loads(content[1]) #scout results.js file contains dict starting on second line
 
+accountID = awsJson["account_id"]
 
 # dicts to hold ports and IP addresses for systems
 tcpPortSystems = {}
@@ -102,25 +120,64 @@ tcpPortSystemsIpv6 = {}
 udpPortSystemsIpv6 = {}
 allPortSystemsIpv6 = {}
 
+# run through awsJson to get details we need later for reporting
+ipDetails = {}
+for region,rDetails in awsJson['services']['ec2']["regions"].items():
+    for vpc,vDetails in rDetails["vpcs"].items():
+        for instance,iDetails in vDetails["instances"].items():
+            for netwInterface,nDetails in iDetails["network_interfaces"].items():
+                if nDetails["Association"] != None and "PublicIp" in nDetails["Association"]:
+                    #print(nDetails)
+                    #exit(0)
+                    ip = nDetails["Association"]["PublicIp"]
+                    ipv6 = nDetails["Ipv6Addresses"]
+                    #if ip == "18.205.93.146":
+                    #    print(ip)
+                    #    print(ipv6)
+
+                    if ip in ipDetails:
+                        print("uhoh")
+                        exit(0)
+                    else:
+                        if ipv6:
+                            for i in ipv6:
+                                #print(i["Ipv6Address"])
+                                ipDetails[i["Ipv6Address"]] = {}
+                                ipDetails[i["Ipv6Address"]]["region"] = region
+                                ipDetails[i["Ipv6Address"]]["vpc"] = vpc
+                                ipDetails[i["Ipv6Address"]]["instance"] = instance
+                    
+                        ipDetails[ip] = {}
+                        ipDetails[ip]["region"] = region
+                        ipDetails[ip]["vpc"] = vpc
+                        ipDetails[ip]["instance"] = instance
+                    #print(region + "," + vpc + "," + instance + "," + ip)
+                else:
+                    #print(str(nDetails["Association"]))
+                    #print("nope!!!!!!!!!!!")
+                    pass
+ 
+
 #TODO UDP/TCP
-csvFile = "Region,DnsName,IP Address,Ports\n"
+csvFile = "AWS Account ID,Region,VPC,Instance ID,IP Address,Ports\n"
 # Loop through IPs of externally accessible systems
 for ip,info in awsJson['services']['ec2']['external_attack_surface'].items():
-    tmpPorts = [] #used for csv report
+    #reportDetails
+    try:
+        region = ipDetails[ip]["region"]
+        vpc = ipDetails[ip]["vpc"]
+        instance = ipDetails[ip]["instance"]
+    except KeyError:
+        region = "Unknown"
+        vpc = "Unknown"
+        instance = "Unknown"
 
+    tmpPorts = [] #used for csv report
     # Loop through protocols
     # TODO refactor to avoid repeat code
     try:
         for prot,protDetails in info['protocols'].items():
-
-            # use dns name unless there isn't one, then use ipv4/ipv6 IP
-            if "PublicDnsName" not in info: 
-                system = ip
-                name = "N/A" #to be used for csv report
-            else:
-                system = info["PublicDnsName"]
-                name = info["PublicDnsName"]
-
+            system = ip
             if prot == "TCP": #case tcp
                 for port,v in protDetails["ports"].items():
                     for cidr in v["cidrs"]:
@@ -194,7 +251,7 @@ for ip,info in awsJson['services']['ec2']['external_attack_surface'].items():
                             tmpPorts.append(port)
         #add to csv report
         if tmpPorts:
-            csvFile = csvFile + "tbd," + name + "," + ip + ",\"" + "\n".join(tmpPorts) + "\"\n" 
+            csvFile = csvFile + accountID + "," + region + "," + vpc + "," + instance + "," + ip + ",\"" + "\n".join(tmpPorts) + "\"\n" 
     
     except KeyError as e:
         print("KeyError: " + str(e))
